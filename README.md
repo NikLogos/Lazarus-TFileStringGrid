@@ -1,3 +1,5 @@
+Written for Lazarus. Supported for Windows only
+
 What it can do:
 
 Display files and folders like in file managers) (only “detailed” mode)

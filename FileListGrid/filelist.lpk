@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <PathDelim Value="\"/>
+    <Name Value="filelist"/>
+    <Type Value="RunAndDesignTime"/>
+    <AddToProjectUsesSection Value="True"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <PathDelim Value="\"/>
+      <SearchPaths>
+        <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+    </CompilerOptions>
+    <Version Minor="9" Release="44" Build="370"/>
+    <Files>
+      <Item>
+        <Filename Value="filelistgrid.pas"/>
+        <HasRegisterProc Value="True"/>
+        <UnitName Value="FileListGrid"/>
+      </Item>
+      <Item>
+        <Filename Value="dirmonw.pas"/>
+        <UnitName Value="dirMonW"/>
+      </Item>
+      <Item>
+        <Filename Value="iconcachemanager.pas"/>
+        <UnitName Value="IconCacheManager"/>
+      </Item>
+      <Item>
+        <Filename Value="cmenu.pas"/>
+        <UnitName Value="cmenu"/>
+      </Item>
+    </Files>
+    <RequiredPkgs>
+      <Item>
+        <PackageName Value="IDEIntf"/>
+      </Item>
+    </RequiredPkgs>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

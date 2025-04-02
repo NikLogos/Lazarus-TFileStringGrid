@@ -31,7 +31,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Grids, LResources,
   shellapi, process, LazUTF8, LCLType, LCLIntf, {dirmon,} dirmonW, fileutil,
-  iconCacheManager, cmenu{, shlobj, windows};
+  iconCacheManager, cmenu, LazFileUtils{, shlobj, windows};
 
 const
   IID_IContextMenu2: TGUID = '{000214F4-0000-0000-C000-000000000046}';
@@ -112,6 +112,8 @@ type
     procedure SelectRow(arow: Integer);
     procedure clearSelected;
     procedure SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer; AIcon: TIcon);
+
+    function itbs(path:string):string;
 
 
   protected
@@ -568,6 +570,11 @@ begin
     ACanvas.Draw(X, Y, AIcon);
 end;
 
+function TFileListGrid.itbs(path: string): string;
+begin
+  result:=includetrailingbackslash(path);
+end;
+
 procedure TFileListGrid.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
   tmp: string;
@@ -756,22 +763,26 @@ begin
       clearSelected;
     end
     else begin
-       AProcess := TProcess.Create(nil);
-       try
-        aProcess.InheritHandles := False;
-        aProcess.Options := aProcess.Options+[poUsePipes];
-        aProcess.ShowWindow := swoShow;
-        for I := 1 to GetEnvironmentVariableCount do aProcess.Environment.Add(GetEnvironmentString(I));
-        aProcess.Executable := FDirectory + DirectorySeparator + Cells[0, Row];
-        aprocess.Execute;
-        except
-          aProcess.Free;
-          opendocument(FDirectory + DirectorySeparator + Cells[0, Row]);
-        end;
+       if FileIsExecutable(itbs(FDirectory)+Cells[0, Row]) then begin
+         AProcess := TProcess.Create(nil);
+         try
+           try
+            aProcess.InheritHandles := False;
+            aProcess.Options := aProcess.Options+[poUsePipes];
+            aProcess.ShowWindow := swoShow;
+            for I := 1 to GetEnvironmentVariableCount do aProcess.Environment.Add(GetEnvironmentString(I));
+            aProcess.Executable := FDirectory + DirectorySeparator + Cells[0, Row];
+            aprocess.Execute;
+           except
+              on E: exception do opendocument(itbs(FDirectory)+Cells[0, Row])
+           end;
+         finally
+           aprocess.Free;
+         end;
+      end;
     end;
   end;
 end;
-
 
 procedure TFileListGrid.Click;
 begin

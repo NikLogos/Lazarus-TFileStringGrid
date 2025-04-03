@@ -387,12 +387,14 @@ begin
      if withpath
      then _dirlist.Add(IncludeTrailingPathDelimiter(Fdirectory)+selecteditems.Strings[counter])
      else _dirlist.Add(selecteditems.Strings[counter]);
+     selectAll(false);
      result:=true;
    end
    else begin
      if withpath
      then _dirlist.Add(IncludeTrailingPathDelimiter(Fdirectory)+selecteditem)
      else _dirlist.Add(selecteditem);
+     selectAll(false);
      result:=true;
    end;
 end;

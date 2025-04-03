@@ -20,6 +20,11 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 
 }
 
+
+{
+function FileIsSymlink(const AFilename: string): boolean;
+function FileIsHardLink(const AFilename: string): boolean;
+}
 unit FileListGrid;
 
 {$mode objfpc}{$H+}
@@ -31,7 +36,7 @@ interface
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, Grids, LResources,
   shellapi, process, LazUTF8, LCLType, LCLIntf, {dirmon,} dirmonW, fileutil,
-  iconCacheManager, cmenu, LazFileUtils{, shlobj, windows};
+  iconCacheManager, dateutils, cmenu, LazFileUtils{, shlobj, windows};
 
 const
   IID_IContextMenu2: TGUID = '{000214F4-0000-0000-C000-000000000046}';
@@ -39,7 +44,7 @@ const
 
 type
 
-  TSortFile = (smNone, smFolder, smDate, smName, smExt, smSize, smRevDate, smRevName, smRevExt, smRevSize);
+  //TSortFile = (smNone, smFolder, smDate, smName, smExt, smSize, smRevDate, smRevName, smRevExt, smRevSize);
   TFileSelectEvent = procedure (Sender: TObject; fName: string) of object;
   TItemSelectEvent = procedure (Sender: TObject; iName: string) of object;
   TDirChangeEvent = procedure (Sender: TObject) of object;
@@ -52,6 +57,8 @@ type
     property Key: string read FKey write FKey;
     property Value: string read FValue write FValue;
   end;
+
+  TSortMode = (smNone, smNameAsc, smNameDesc, smSizeAsc, smSizeDesc, smDateAsc, smDateDesc);
 
   { TKeyValueCollection }
 
@@ -77,6 +84,7 @@ type
     langKiloByte:string;
     langMegaByte:string;
     langGigaByte:string;
+    langTeraByte:string;
     langGoDirError:string;
     langError:string;
     langCell0:string;
@@ -104,6 +112,10 @@ type
 
     tmpMenuList:tstringlist;
 
+    //сорт
+    FLastSortColumn: Integer;
+    FLastSortMode: TSortMode;
+
 
     procedure LoadFiles;
     procedure AdjustColumnWidth;
@@ -115,6 +127,11 @@ type
 
     function itbs(path:string):string;
 
+    procedure SortFiles(SortMode: TSortMode);
+
+    function ParseDate(DateStr: string): TDateTime;
+    function ParseSize(SizeStr: string): Int64;
+//    function CompareItems(IsFolder1, IsFolder2: Boolean; CompareResult: Boolean; Reverse: Boolean): Boolean;
 
   protected
     procedure DblClick; override;
@@ -214,6 +231,7 @@ begin
   langKiloByte:=' кб';
   langMegaByte:=' мб';
   langGigaByte:=' гб';
+  langTeraByte:=' тб';
   langGoDirError:='Ошибка доступа';
   langError:='Ошибка';
   langCell0:='Имя';
@@ -431,6 +449,7 @@ begin
   if _ThreadStarted then FreeAndNil(_dirWatch);  // Освобождаем память
 end;
 
+{
 procedure TFileListGrid.LoadFiles;
 var
   Folders, Files: TStringList;
@@ -511,6 +530,106 @@ begin
   endupdate;
 
 end;
+}
+
+procedure TFileListGrid.LoadFiles;
+var
+  Folders, Files: TStringList;
+  SR: TSearchRec;
+  NewRow, i, EqPos: Integer;
+  FileName, FileSize, FileDate, tmp: String;
+  fsize: real;
+  FileAttr: LongInt;
+  DateTime: TDateTime;
+begin
+  BeginUpdate;
+  try
+    RowCount := 1;
+
+    Folders := TStringList.Create;
+    Files := TStringList.Create;
+    try
+      if FindFirst(FDirectory + DirectorySeparator + '*', faAnyFile, SR) = 0 then
+      begin
+        repeat
+          if (SR.Name <> '.') then
+          begin
+            if (SR.Attr and faDirectory) <> 0
+            then Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd:mm:yy hh:nn:ss', FileDateToDateTime(SR.Time)))
+            else Files.Add(SR.Name + '=' + IntToStr(SR.Size) + '=' + FormatDateTime('dd:mm:yy hh:nn:ss', FileDateToDateTime(SR.Time)));
+          end;
+        until FindNext(SR) <> 0;
+        FindClose(SR);
+      end;
+
+      // Добавляем папки в список
+      for i := 0 to Folders.Count - 1 do
+      begin
+        tmp := Folders[i];
+        EqPos := Pos('=', tmp);
+        if EqPos > 0 then
+        begin
+          FileName := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+
+          EqPos := Pos('=', tmp);
+          FileSize := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+          FileDate := tmp;
+
+          RowCount := RowCount + 1;
+          NewRow := RowCount - 1;
+          Cells[0, NewRow] := FileName;
+          Cells[1, NewRow] := langFolderName;
+          Cells[2, NewRow] := FileDate; // Теперь для папок тоже выводится дата
+        end;
+      end;
+
+      // Добавляем файлы в список
+      for i := 0 to Files.Count - 1 do
+      begin
+        tmp := Files[i];
+        EqPos := Pos('=', tmp);
+        if EqPos > 0 then
+        begin
+          FileName := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+
+          EqPos := Pos('=', tmp);
+          FileSize := Copy(tmp, 1, EqPos - 1);
+
+          // Преобразование размера
+          fsize := StrToFloat(FileSize);
+          if fsize < 1024 then
+            FileSize := FileSize + langByte
+          else if fsize < 1048576 then
+            FileSize := FloatToStrF(fsize/1024, ffFixed, 8, 2) + langKiloByte
+          else if fsize < 1073741824 then
+            FileSize := FloatToStrF(fsize/1048576, ffFixed, 8, 2) + langMegaByte
+          else
+            FileSize := FloatToStrF(fsize/1073741824, ffFixed, 8, 2) + langGigaByte;
+
+          Delete(tmp, 1, EqPos);
+          FileDate := tmp;
+
+          RowCount := RowCount + 1;
+          NewRow := RowCount - 1;
+          Cells[0, NewRow] := FileName;
+          Cells[1, NewRow] := FileSize;
+          Cells[2, NewRow] := FileDate;
+        end;
+      end;
+
+    finally
+      Folders.Free;
+      Files.Free;
+    end;
+
+    SelectRow(FindRowByText(selItem));
+  finally
+    EndUpdate;
+  end;
+end;
 
 
 procedure TFileListGrid.AdjustColumnWidth;
@@ -576,6 +695,218 @@ function TFileListGrid.itbs(path: string): string;
 begin
   result:=includetrailingbackslash(path);
 end;
+
+procedure TFileListGrid.SortFiles(SortMode: TSortMode);
+var
+  i, j: Integer;
+  TempRow: array[0..2] of string;
+  Size1, Size2: Int64;
+  IsFolder1, IsFolder2: Boolean;
+  IsParentDir1, IsParentDir2: Boolean;
+  Date1, Date2: TDateTime;
+  NeedSwap: Boolean;
+begin
+  if RowCount <= 2 then Exit;
+
+  BeginUpdate;
+  try
+    for i := 1 to RowCount - 2 do
+    begin
+      for j := i + 1 to RowCount - 1 do
+      begin
+        IsParentDir1 := (Cells[0, i] = '..');
+        IsParentDir2 := (Cells[0, j] = '..');
+
+        // Папка ".." всегда должна быть первой
+        if IsParentDir1 then Continue;
+        if IsParentDir2 then
+        begin
+          NeedSwap := True;
+        end
+        else
+        begin
+          IsFolder1 := (Cells[1, i] = langFolderName);
+          IsFolder2 := (Cells[1, j] = langFolderName);
+
+          case SortMode of
+            smNameAsc:
+            begin
+              if IsFolder1 and IsFolder2 then
+                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) > 0
+              else if not IsFolder1 and not IsFolder2 then
+                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) > 0
+              else
+                NeedSwap := not IsFolder1 and IsFolder2;
+            end;
+
+            smNameDesc:
+            begin
+              if IsFolder1 and IsFolder2 then
+                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) < 0
+              else if not IsFolder1 and not IsFolder2 then
+                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) < 0
+              else
+                NeedSwap := not IsFolder1 and IsFolder2;
+            end;
+
+            smSizeAsc, smSizeDesc:
+            begin
+              // Для сортировки по размеру - папки остаются в исходном порядке
+              if IsFolder1 and IsFolder2 then
+                NeedSwap := False // Не меняем порядок папок
+              else if not IsFolder1 and not IsFolder2 then
+              begin
+                // Сортируем только файлы
+                Size1 := ParseSize(Cells[1, i]);
+                Size2 := ParseSize(Cells[1, j]);
+                if SortMode = smSizeAsc then
+                  NeedSwap := Size1 > Size2
+                else
+                  NeedSwap := Size1 < Size2;
+              end
+              else
+                NeedSwap := not IsFolder1 and IsFolder2; // Папки перед файлами
+            end;
+
+            smDateAsc:
+            begin
+              Date1 := ParseDate(Cells[2, i]);
+              Date2 := ParseDate(Cells[2, j]);
+              if IsFolder1 and IsFolder2 then
+                NeedSwap := (Date1 > Date2) or
+                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) > 0))
+              else if not IsFolder1 and not IsFolder2 then
+                NeedSwap := (Date1 > Date2) or
+                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) > 0))
+              else
+                NeedSwap := not IsFolder1 and IsFolder2;
+            end;
+
+            smDateDesc:
+            begin
+              Date1 := ParseDate(Cells[2, i]);
+              Date2 := ParseDate(Cells[2, j]);
+              if IsFolder1 and IsFolder2 then
+                NeedSwap := (Date1 < Date2) or
+                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) < 0))
+              else if not IsFolder1 and not IsFolder2 then
+                NeedSwap := (Date1 < Date2) or
+                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) < 0))
+              else
+                NeedSwap := not IsFolder1 and IsFolder2;
+            end;
+          end;
+        end;
+
+        if NeedSwap then
+        begin
+          TempRow[0] := Cells[0, i];
+          TempRow[1] := Cells[1, i];
+          TempRow[2] := Cells[2, i];
+
+          Cells[0, i] := Cells[0, j];
+          Cells[1, i] := Cells[1, j];
+          Cells[2, i] := Cells[2, j];
+
+          Cells[0, j] := TempRow[0];
+          Cells[1, j] := TempRow[1];
+          Cells[2, j] := TempRow[2];
+        end;
+      end;
+    end;
+  finally
+    EndUpdate;
+  end;
+
+  if selItem <> '' then
+    SelectRow(FindRowByText(selItem));
+end;
+
+
+
+function TFileListGrid.ParseSize(SizeStr: string): Int64;
+var
+  NumStr: string;
+  SizeUnit: string;
+  Value: Double;
+begin
+  Result := 0;
+  SizeStr := StringReplace(SizeStr, ' ', '', [rfReplaceAll]);
+
+  if SizeStr = langFolderName then
+    Exit(0);
+
+  if Pos(langByte, SizeStr) > 0 then
+  begin
+    NumStr := StringReplace(SizeStr, langByte, '', [rfReplaceAll]);
+    SizeUnit := langByte;
+  end
+  else if Pos(langKiloByte, SizeStr) > 0 then
+  begin
+    NumStr := StringReplace(SizeStr, langKiloByte, '', [rfReplaceAll]);
+    SizeUnit := langKiloByte;
+  end
+  else if Pos(langMegaByte, SizeStr) > 0 then
+  begin
+    NumStr := StringReplace(SizeStr, langMegaByte, '', [rfReplaceAll]);
+    SizeUnit := langMegaByte;
+  end
+  else if Pos(langGigaByte, SizeStr) > 0 then
+  begin
+    NumStr := StringReplace(SizeStr, langGigaByte, '', [rfReplaceAll]);
+    SizeUnit := langGigaByte;
+  end{
+  else if Pos(' тб', SizeStr) > 0 then
+  begin
+    NumStr := StringReplace(SizeStr, ' тб', '', [rfReplaceAll]);
+    SizeUnit := ' тб';
+  end}
+  else
+    Exit(0);
+
+  if TryStrToFloat(NumStr, Value) then
+  begin
+    if SizeUnit = langByte then
+      Result := Round(Value)
+    else if SizeUnit = langKiloByte then
+      Result := Round(Value * 1024)
+    else if SizeUnit = langMegaByte then
+      Result := Round(Value * 1024 * 1024)
+    else if SizeUnit = langGigaByte then
+      Result := Round(Value * 1024 * 1024 * 1024);{
+    else if SizeUnit = ' тб' then
+      Result := Round(Value * 1024 * 1024 * 1024 * 1024);}
+  end;
+end;
+
+function TFileListGrid.ParseDate(DateStr: string): TDateTime;
+var
+  Day, Month, Year, Hour, Min, Sec: Word;
+begin
+  Result := 0;
+  if DateStr = '' then Exit;
+
+  try
+    // Разбираем строку формата 'dd:mm:yy hh:nn:ss'
+    Day := StrToInt(Copy(DateStr, 1, 2));
+    Month := StrToInt(Copy(DateStr, 4, 2));
+    Year := StrToInt(Copy(DateStr, 7, 2));
+    // Обработка года (предполагаем, что 00-79 - это 2000-2079, 80-99 - 1980-1999)
+    if Year < 80 then
+      Year := Year + 2000
+    else
+      Year := Year + 1900;
+
+    Hour := StrToInt(Copy(DateStr, 10, 2));
+    Min := StrToInt(Copy(DateStr, 13, 2));
+    Sec := StrToInt(Copy(DateStr, 16, 2));
+
+    Result := EncodeDateTime(Year, Month, Day, Hour, Min, Sec, 0);
+  except
+    Result := 0;
+  end;
+end;
+
 
 procedure TFileListGrid.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
@@ -712,6 +1043,7 @@ procedure TFileListGrid.MouseUp(Button: TMouseButton; Shift: TShiftState; X,
 var
   ACol, ARow: Integer;
   CellR: TRect;
+  NewSortMode: TSortMode;
 begin
   inherited;
 
@@ -738,6 +1070,61 @@ begin
       tmpMenuList.Clear;
       tmpMenuList.Add(FDirectory);
       ShowWindowsContextMenu(handle,tmpMenuList, X, Y);
+    end;
+  end;
+
+  //сортировка
+  if Button = mbLeft then
+  begin
+    MouseToCell(X, Y, ACol, ARow);
+    if ARow = 0 then // Клик по заголовку
+    begin
+      case ACol of
+        0: // Сортировка по имени
+        begin
+          if FLastSortColumn = 0 then
+          begin
+            if FLastSortMode = smNameAsc then
+              NewSortMode := smNameDesc
+            else
+              NewSortMode := smNameAsc;
+          end
+          else
+            NewSortMode := smNameAsc;
+        end;
+
+        1: // Сортировка по размеру
+        begin
+          if FLastSortColumn = 1 then
+          begin
+            if FLastSortMode = smSizeAsc then
+              NewSortMode := smSizeDesc
+            else
+              NewSortMode := smSizeAsc;
+          end
+          else
+            NewSortMode := smSizeAsc;
+        end;
+
+        2: // Сортировка по дате
+        begin
+          if FLastSortColumn = 2 then
+          begin
+            if FLastSortMode = smDateAsc then
+              NewSortMode := smDateDesc
+            else
+              NewSortMode := smDateAsc;
+          end
+          else
+            NewSortMode := smDateAsc;
+        end;
+      else
+        Exit;
+      end;
+
+      FLastSortColumn := ACol;
+      FLastSortMode := NewSortMode;
+      SortFiles(NewSortMode);
     end;
   end;
 end;

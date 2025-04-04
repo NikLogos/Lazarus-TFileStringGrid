@@ -107,6 +107,9 @@ type
     FIconFile: TIcon;
     IconManager:TIconCacheManager;
 
+    FIconAsk: TPortableNetworkGraphic;
+    FIconDesk: TPortableNetworkGraphic;
+
     FImageList: TImageList;
     DirList:tstringlist;
 
@@ -119,8 +122,8 @@ type
     FLastSortColumn: Integer;
     FLastSortMode: TSortMode;
 
-
     procedure LoadFiles;
+    procedure SortFiles(SortMode: TSortMode);
     procedure AdjustColumnWidth;
     procedure GetFileIcon(const FileName: string; Icon: TIcon);
     function FindRowByText(const SearchText: string): integer;
@@ -130,8 +133,6 @@ type
 
     function itbs(path:string):string;
 
-    procedure SortFiles(SortMode: TSortMode);
-
     function ParseDate(DateStr: string): TDateTime;
     function ParseSize(SizeStr: string): Int64;
 
@@ -140,6 +141,8 @@ type
     procedure Click; override;
     procedure KeyDown(var Key : Word; Shift : TShiftState); override;
     procedure DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState); override;
+    procedure DrawSortIcon(ACol: Integer; AIcon: TPortableNetworkGraphic);
+
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
 
   public
@@ -158,8 +161,11 @@ type
     procedure runApp(path:string; cmdline:tstringlist);
     function getSelectedItems(var _DirList:tstringlist; withPath:boolean):boolean;
     procedure selectAll(doselect:boolean);
-
-
+    procedure _startDirWatch;
+    procedure _stopDirWatch;
+    function SortModeToStr(SortMode: TSortMode): string;
+    function StrToSortMode(const Str: string): TSortMode;
+    procedure SetSortMode(SortMode:TSortMode);
 
   published
     property Directory: string read FDirectory write SetDirectory;
@@ -168,9 +174,9 @@ type
     property SelectedItem: string read selItem write selitem;
     property SelectedItems: Tstrings read selItems write selItems;
     property FilesColorUse: boolean read usefcolor write usefcolor;
-    property FilesColor: TKeyValueCollection read FFilesColor write FFilesColor ;
-    procedure _startDirWatch;
-    procedure _stopDirWatch;
+    property FilesColor: TKeyValueCollection read FFilesColor write FFilesColor;
+    property SortMode: TSortMode read FLastSortMode write SetSortMode;
+
 
   end;
 
@@ -262,7 +268,14 @@ begin
   flat:=true;
 
   FIconFolder := TPortableNetworkGraphic.Create;
-  FIconFolder.LoadFromLazarusResource('FOLDER02');
+  FIconFolder.LoadFromLazarusResource('FOLDER');
+
+  FIconAsk := TPortableNetworkGraphic.Create;
+  FIconDesk := TPortableNetworkGraphic.Create;
+
+  FIconAsk.LoadFromLazarusResource('ASK');
+  FIconDesk.LoadFromLazarusResource('DESK');
+
 
   FImageList := TImageList.Create(Self);
   FImageList.Width := 16;
@@ -327,6 +340,8 @@ begin
   end;
   tmpMenuList:=tstringlist.Create;
 
+  FLastSortMode:=smNameAsc;
+  FLastSortColumn:=-1;
 end;
 
 destructor TFileListGrid.Destroy;
@@ -335,6 +350,8 @@ begin
 
   tmpMenuList.free;
 
+  FIconAsk.Free;
+  FIconDesk.Free;
   IconManager.free;
   FIconFolder.Free;
   FIconFile.Free;
@@ -633,10 +650,12 @@ begin
       Files.Free;
     end;
 
+    sortFiles(FLastSortMode);
     SelectRow(FindRowByText(selItem));
   finally
     EndUpdate;
   end;
+
 end;
 
 
@@ -689,7 +708,7 @@ end;
 procedure TFileListGrid.clearSelected;
 begin
   selitems.Clear;
-  //selectedItem:='';
+
 end;
 
 function TFileListGrid.itbs(path: string): string;
@@ -697,14 +716,6 @@ begin
   result:=includetrailingbackslash(path);
 end;
 
-{
-procedure TFileListGrid.SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer;
-  AIcon: TIcon);
-begin
-  if Assigned(AIcon) and not AIcon.Empty then
-    ACanvas.Draw(X, Y, AIcon);
-end;
-}
 procedure TFileListGrid.SortFiles(SortMode: TSortMode);
 var
   TempData: TGridData;
@@ -803,6 +814,9 @@ var
   end;
 
 begin
+
+  FLastSortMode := SortMode;
+
   if RowCount <= 2 then Exit;
 
   // 1. Копируем данные во временный массив
@@ -892,6 +906,50 @@ begin
   end;
 end;
 
+function TFileListGrid.SortModeToStr(SortMode: TSortMode): string;
+begin
+  case SortMode of
+    smNone:     Result := 'smNone';
+    smNameAsc:  Result := 'smNameAsc';
+    smNameDesc: Result := 'smNameDesc';
+    smSizeAsc:  Result := 'smSizeAsc';
+    smSizeDesc: Result := 'smSizeDesc';
+    smDateAsc:  Result := 'smDateAsc';
+    smDateDesc: Result := 'smDateDesc';
+  else
+    Result := 'smNone';
+  end;
+end;
+
+
+function TFileListGrid.StrToSortMode(const Str: string): TSortMode;
+begin
+  if Str = 'smNone' then Result := smNone
+  else if Str = 'smNameAsc'  then Result := smNameAsc
+  else if Str = 'smNameDesc' then Result := smNameDesc
+  else if Str = 'smSizeAsc'  then Result := smSizeAsc
+  else if Str = 'smSizeDesc' then Result := smSizeDesc
+  else if Str = 'smDateAsc'  then Result := smDateAsc
+  else if Str = 'smDateDesc' then Result := smDateDesc
+  else Result := smNone;
+end;
+
+procedure TFileListGrid.SetSortMode(SortMode: TSortMode);
+begin
+  FLastSortMode := SortMode;
+
+  case SortMode of
+    smNameAsc, smNameDesc: FLastSortColumn := 0;
+    smSizeAsc, smSizeDesc: FLastSortColumn := 1;
+    smDateAsc, smDateDesc: FLastSortColumn := 2;
+  else
+    FLastSortColumn := -1;
+  end;
+
+  SortFiles(SortMode);
+  Invalidate;
+end;
+
 function TFileListGrid.ParseDate(DateStr: string): TDateTime;
 var
   Day, Month, Year, Hour, Min, Sec: Word;
@@ -933,6 +991,9 @@ var
   IsFolder: Boolean;
   IsInsSelected: Boolean;
   FilePath: string;
+
+  Icon: TPortableNetworkGraphic;
+
 begin
   // Настройка высоты строки
   if FIconFolder.Height = 20 then
@@ -948,6 +1009,7 @@ begin
 
   IsFolder := (ARow > 0) and (Cells[1, ARow] = langFolderName);
   IsInsSelected := (selItems.Count <> 0) and (selitems.IndexOf(Cells[0, ARow]) <> -1);
+
 
   // Определяем цвет текста для всей строки
   if IsInsSelected then
@@ -1049,6 +1111,30 @@ begin
       Canvas.TextOut(ARect.Left + 3, ARect.Top + offset, Cells[ACol, ARow]);
     end;
   end;
+
+  { Отображение значка сортировки в заголовке при запуске }
+  if (ARow = 0) and (ACol = FLastSortColumn) and (FLastSortMode <> smNone) then
+  begin
+    if FLastSortMode in [smNameAsc, smSizeAsc, smDateAsc] then
+      Icon := FIconAsk  // Стрелка вверх
+    else
+      Icon := FIconDesk; // Стрелка вниз
+
+    DrawSortIcon(ACol, Icon);
+  end;
+end;
+
+procedure TFileListGrid.DrawSortIcon(ACol: Integer;
+  AIcon: TPortableNetworkGraphic);
+var
+  Rect: TRect;
+begin
+  Rect := CellRect(ACol, 0);
+  Canvas.Draw(
+    Rect.Right - AIcon.Width - 5,
+    Rect.Top + (Rect.Height - AIcon.Height) div 2,
+    AIcon
+  );
 end;
 
 procedure TFileListGrid.MouseUp(Button: TMouseButton; Shift: TShiftState; X,
@@ -1137,7 +1223,8 @@ begin
 
       FLastSortColumn := ACol;
       FLastSortMode := NewSortMode;
-      SortFiles(NewSortMode);
+      //SortFiles(NewSortMode);
+      LoadFiles;
     end;
   end;
 end;

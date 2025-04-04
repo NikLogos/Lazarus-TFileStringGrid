@@ -43,6 +43,8 @@ const
   IID_IContextMenu3: TGUID = '{BCFCE0A0-EC17-11D0-8D10-00A0C90F2719}';
 
 type
+  TGridRow = array[0..2] of string;  // Одна строка данных (имя, размер, дата)
+  TGridData = array of TGridRow;     // Массив строк данных
 
   //TSortFile = (smNone, smFolder, smDate, smName, smExt, smSize, smRevDate, smRevName, smRevExt, smRevSize);
   TFileSelectEvent = procedure (Sender: TObject; fName: string) of object;
@@ -90,6 +92,7 @@ type
     langCell0:string;
     langCell1:string;
     langCell2:string;
+    langLoadData:string;
     //************************ LANG
 
     FDirectory: String;
@@ -123,7 +126,7 @@ type
     function FindRowByText(const SearchText: string): integer;
     procedure SelectRow(arow: Integer);
     procedure clearSelected;
-    procedure SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer; AIcon: TIcon);
+//    procedure SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer; AIcon: TIcon);
 
     function itbs(path:string):string;
 
@@ -131,7 +134,6 @@ type
 
     function ParseDate(DateStr: string): TDateTime;
     function ParseSize(SizeStr: string): Int64;
-//    function CompareItems(IsFolder1, IsFolder2: Boolean; CompareResult: Boolean; Reverse: Boolean): Boolean;
 
   protected
     procedure DblClick; override;
@@ -139,7 +141,6 @@ type
     procedure KeyDown(var Key : Word; Shift : TShiftState); override;
     procedure DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState); override;
     procedure MouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
-    //procedure ShowWindowsContextMenu(X, Y: Integer);
 
   public
     //**********************************
@@ -157,6 +158,8 @@ type
     procedure runApp(path:string; cmdline:tstringlist);
     function getSelectedItems(var _DirList:tstringlist; withPath:boolean):boolean;
     procedure selectAll(doselect:boolean);
+
+
 
   published
     property Directory: string read FDirectory write SetDirectory;
@@ -237,6 +240,7 @@ begin
   langCell0:='Имя';
   langCell1:='Размер';
   langCell2:='Дата';
+  langLoadData:='Чтение каталога';
   //************************ LANG
   Parent := TWinControl(AOwner); // Устанавливаем родителя
 
@@ -350,15 +354,20 @@ begin
   excludetrailingbackslash(tmp);
   if not DirectoryExists(tmp) then tmp:='c:';
   FDirectory := tmp;
-
-
+  {
+  cells[0,0]:=langLoadData;
+  cells[0,0]:=langCell0;
+  application.ProcessMessages;
+  }
 
   LoadFiles;
+
   if assigned(FOnDirChange) then FOnDirChange(self);
   if _ThreadStarted then begin
     _StopDirWatch;
     _StartDirWatch;
   end;
+
 end;
 
 procedure TFileListGrid.thUpdList(sender: tobject);
@@ -435,6 +444,7 @@ begin
 
   selectRow(findRowByText(tmp));
 end;
+
 
 procedure TFileListGrid._startDirWatch;
 begin
@@ -539,8 +549,6 @@ var
   NewRow, i, EqPos: Integer;
   FileName, FileSize, FileDate, tmp: String;
   fsize: real;
-  FileAttr: LongInt;
-  DateTime: TDateTime;
 begin
   BeginUpdate;
   try
@@ -636,7 +644,7 @@ procedure TFileListGrid.AdjustColumnWidth;
 var
   i, MaxWidth, TextWidth: Integer;
 begin
-  MaxWidth := Canvas.TextWidth('Имя');
+  MaxWidth := Canvas.TextWidth(langCell0);
   for i := 1 to RowCount - 1 do
   begin
     TextWidth := Canvas.TextWidth(Cells[0, i]) + 10;
@@ -684,144 +692,149 @@ begin
   //selectedItem:='';
 end;
 
+function TFileListGrid.itbs(path: string): string;
+begin
+  result:=includetrailingbackslash(path);
+end;
+
+{
 procedure TFileListGrid.SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer;
   AIcon: TIcon);
 begin
   if Assigned(AIcon) and not AIcon.Empty then
     ACanvas.Draw(X, Y, AIcon);
 end;
-
-function TFileListGrid.itbs(path: string): string;
-begin
-  result:=includetrailingbackslash(path);
-end;
-
+}
 procedure TFileListGrid.SortFiles(SortMode: TSortMode);
 var
-  i, j: Integer;
-  TempRow: array[0..2] of string;
-  Size1, Size2: Int64;
-  IsFolder1, IsFolder2: Boolean;
-  IsParentDir1, IsParentDir2: Boolean;
-  Date1, Date2: TDateTime;
-  NeedSwap: Boolean;
+  TempData: TGridData;
+  i: Integer;
+
+  // Функция сравнения с учетом всех требований
+  function CompareRows(const Row1, Row2: TGridRow): Integer;
+  var
+    IsFolder1, IsFolder2: Boolean;
+    Size1, Size2: Int64;
+    Date1, Date2: TDateTime;
+  begin
+    // 1. Папка ".." всегда первая
+    if Row1[0] = '..' then Exit(-1);
+    if Row2[0] = '..' then Exit(1);
+
+    // 2. Определяем тип элементов (папка/файл)
+    IsFolder1 := (Row1[1] = langFolderName);
+    IsFolder2 := (Row2[1] = langFolderName);
+
+    // 3. Все папки идут перед файлами
+    if IsFolder1 and not IsFolder2 then Exit(-1);
+    if IsFolder2 and not IsFolder1 then Exit(1);
+
+    // 4. Сравнение в зависимости от режима сортировки
+    case SortMode of
+      smNameAsc:  Result := UTF8CompareText(Row1[0], Row2[0]);
+      smNameDesc: Result := -UTF8CompareText(Row1[0], Row2[0]);
+
+      smSizeAsc, smSizeDesc:
+      begin
+        if IsFolder1 then
+          // Для папок при сортировке по размеру используем сортировку по имени
+          Result := UTF8CompareText(Row1[0], Row2[0])
+        else
+        begin
+          // Для файлов - сортируем по размеру
+          Size1 := ParseSize(Row1[1]);
+          Size2 := ParseSize(Row2[1]);
+          if Size1 < Size2 then Result := -1
+          else if Size1 > Size2 then Result := 1
+          else Result := UTF8CompareText(Row1[0], Row2[0]);
+
+          if SortMode = smSizeDesc then Result := -Result;
+        end;
+      end;
+
+      smDateAsc, smDateDesc:
+      begin
+        // Для всех элементов (и папок и файлов) используем сортировку по дате
+        Date1 := ParseDate(Row1[2]);
+        Date2 := ParseDate(Row2[2]);
+
+        if Date1 < Date2 then Result := -1
+        else if Date1 > Date2 then Result := 1
+        else Result := UTF8CompareText(Row1[0], Row2[0]);
+
+        if SortMode = smDateDesc then Result := -Result;
+      end;
+    else
+      Result := 0;
+    end;
+  end;
+
+  // Реализация QuickSort
+  procedure QuickSort(var AData: TGridData; L, R: Integer);
+  var
+    I, J: Integer;
+    Pivot: TGridRow;
+    Temp: TGridRow;
+  begin
+    if L >= R then Exit;
+
+    Pivot := AData[(L + R) div 2];
+    I := L;
+    J := R;
+
+    repeat
+      while CompareRows(AData[I], Pivot) < 0 do Inc(I);
+      while CompareRows(AData[J], Pivot) > 0 do Dec(J);
+
+      if I <= J then
+      begin
+        // Обмен строк
+        Temp := AData[I];
+        AData[I] := AData[J];
+        AData[J] := Temp;
+
+        Inc(I);
+        Dec(J);
+      end;
+    until I > J;
+
+    if L < J then QuickSort(AData, L, J);
+    if I < R then QuickSort(AData, I, R);
+  end;
+
 begin
   if RowCount <= 2 then Exit;
 
+  // 1. Копируем данные во временный массив
+  SetLength(TempData, RowCount - 1);
+  for i := 1 to RowCount - 1 do
+  begin
+    TempData[i-1][0] := Cells[0, i];
+    TempData[i-1][1] := Cells[1, i];
+    TempData[i-1][2] := Cells[2, i];
+  end;
+
+  // 2. Сортируем данные
+  if Length(TempData) > 1 then
+    QuickSort(TempData, 0, High(TempData));
+
+  // 3. Обновляем грид
   BeginUpdate;
   try
-    for i := 1 to RowCount - 2 do
+    for i := 1 to RowCount - 1 do
     begin
-      for j := i + 1 to RowCount - 1 do
-      begin
-        IsParentDir1 := (Cells[0, i] = '..');
-        IsParentDir2 := (Cells[0, j] = '..');
-
-        // Папка ".." всегда должна быть первой
-        if IsParentDir1 then Continue;
-        if IsParentDir2 then
-        begin
-          NeedSwap := True;
-        end
-        else
-        begin
-          IsFolder1 := (Cells[1, i] = langFolderName);
-          IsFolder2 := (Cells[1, j] = langFolderName);
-
-          case SortMode of
-            smNameAsc:
-            begin
-              if IsFolder1 and IsFolder2 then
-                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) > 0
-              else if not IsFolder1 and not IsFolder2 then
-                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) > 0
-              else
-                NeedSwap := not IsFolder1 and IsFolder2;
-            end;
-
-            smNameDesc:
-            begin
-              if IsFolder1 and IsFolder2 then
-                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) < 0
-              else if not IsFolder1 and not IsFolder2 then
-                NeedSwap := UTF8CompareText(Cells[0, i], Cells[0, j]) < 0
-              else
-                NeedSwap := not IsFolder1 and IsFolder2;
-            end;
-
-            smSizeAsc, smSizeDesc:
-            begin
-              // Для сортировки по размеру - папки остаются в исходном порядке
-              if IsFolder1 and IsFolder2 then
-                NeedSwap := False // Не меняем порядок папок
-              else if not IsFolder1 and not IsFolder2 then
-              begin
-                // Сортируем только файлы
-                Size1 := ParseSize(Cells[1, i]);
-                Size2 := ParseSize(Cells[1, j]);
-                if SortMode = smSizeAsc then
-                  NeedSwap := Size1 > Size2
-                else
-                  NeedSwap := Size1 < Size2;
-              end
-              else
-                NeedSwap := not IsFolder1 and IsFolder2; // Папки перед файлами
-            end;
-
-            smDateAsc:
-            begin
-              Date1 := ParseDate(Cells[2, i]);
-              Date2 := ParseDate(Cells[2, j]);
-              if IsFolder1 and IsFolder2 then
-                NeedSwap := (Date1 > Date2) or
-                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) > 0))
-              else if not IsFolder1 and not IsFolder2 then
-                NeedSwap := (Date1 > Date2) or
-                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) > 0))
-              else
-                NeedSwap := not IsFolder1 and IsFolder2;
-            end;
-
-            smDateDesc:
-            begin
-              Date1 := ParseDate(Cells[2, i]);
-              Date2 := ParseDate(Cells[2, j]);
-              if IsFolder1 and IsFolder2 then
-                NeedSwap := (Date1 < Date2) or
-                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) < 0))
-              else if not IsFolder1 and not IsFolder2 then
-                NeedSwap := (Date1 < Date2) or
-                           ((Date1 = Date2) and (UTF8CompareText(Cells[0, i], Cells[0, j]) < 0))
-              else
-                NeedSwap := not IsFolder1 and IsFolder2;
-            end;
-          end;
-        end;
-
-        if NeedSwap then
-        begin
-          TempRow[0] := Cells[0, i];
-          TempRow[1] := Cells[1, i];
-          TempRow[2] := Cells[2, i];
-
-          Cells[0, i] := Cells[0, j];
-          Cells[1, i] := Cells[1, j];
-          Cells[2, i] := Cells[2, j];
-
-          Cells[0, j] := TempRow[0];
-          Cells[1, j] := TempRow[1];
-          Cells[2, j] := TempRow[2];
-        end;
-      end;
+      Cells[0, i] := TempData[i-1][0];
+      Cells[1, i] := TempData[i-1][1];
+      Cells[2, i] := TempData[i-1][2];
     end;
   finally
     EndUpdate;
   end;
 
+  // 4. Восстанавливаем выделение
   if selItem <> '' then
     SelectRow(FindRowByText(selItem));
 end;
-
 
 
 function TFileListGrid.ParseSize(SizeStr: string): Int64;
@@ -831,38 +844,38 @@ var
   Value: Double;
 begin
   Result := 0;
-  SizeStr := StringReplace(SizeStr, ' ', '', [rfReplaceAll]);
+  //SizeStr := UTF8StringReplace(SizeStr, ' ', '', [rfReplaceAll]);
 
   if SizeStr = langFolderName then
     Exit(0);
-
-  if Pos(langByte, SizeStr) > 0 then
+  if UTF8Pos(langByte, SizeStr) > 0 then
   begin
-    NumStr := StringReplace(SizeStr, langByte, '', [rfReplaceAll]);
+    NumStr := UTF8StringReplace(SizeStr, langByte, '', [rfReplaceAll]);
     SizeUnit := langByte;
   end
-  else if Pos(langKiloByte, SizeStr) > 0 then
+  else if UTF8Pos(langKiloByte, SizeStr) > 0 then
   begin
-    NumStr := StringReplace(SizeStr, langKiloByte, '', [rfReplaceAll]);
+    NumStr := UTF8StringReplace(SizeStr, langKiloByte, '', [rfReplaceAll]);
     SizeUnit := langKiloByte;
   end
-  else if Pos(langMegaByte, SizeStr) > 0 then
+  else if UTF8Pos(langMegaByte, SizeStr) > 0 then
   begin
-    NumStr := StringReplace(SizeStr, langMegaByte, '', [rfReplaceAll]);
+    NumStr := UTF8StringReplace(SizeStr, langMegaByte, '', [rfReplaceAll]);
     SizeUnit := langMegaByte;
   end
-  else if Pos(langGigaByte, SizeStr) > 0 then
+  else if UTF8Pos(langGigaByte, SizeStr) > 0 then
   begin
-    NumStr := StringReplace(SizeStr, langGigaByte, '', [rfReplaceAll]);
+    NumStr := UTF8StringReplace(SizeStr, langGigaByte, '', [rfReplaceAll]);
     SizeUnit := langGigaByte;
-  end{
-  else if Pos(' тб', SizeStr) > 0 then
+  end
+  else if UTF8Pos(langTeraByte, SizeStr) > 0 then
   begin
-    NumStr := StringReplace(SizeStr, ' тб', '', [rfReplaceAll]);
-    SizeUnit := ' тб';
-  end}
-  else
+    NumStr := UTF8StringReplace(SizeStr, langTeraByte, '', [rfReplaceAll]);
+    SizeUnit := langTeraByte;
+  end
+  else begin
     Exit(0);
+  end;
 
   if TryStrToFloat(NumStr, Value) then
   begin
@@ -873,9 +886,9 @@ begin
     else if SizeUnit = langMegaByte then
       Result := Round(Value * 1024 * 1024)
     else if SizeUnit = langGigaByte then
-      Result := Round(Value * 1024 * 1024 * 1024);{
-    else if SizeUnit = ' тб' then
-      Result := Round(Value * 1024 * 1024 * 1024 * 1024);}
+      Result := Round(Value * 1024 * 1024 * 1024)
+    else if SizeUnit = langTeraByte then
+      Result := Round(Value * 1024 * 1024 * 1024 * 1024);
   end;
 end;
 
@@ -1129,17 +1142,25 @@ begin
   end;
 end;
 
-
 procedure TFileListGrid.DblClick;
 var
   AProcess: TProcess;
   i:integer;
+
+  ClickPoint: TPoint;
+  ACol, ARow: Integer;
 begin
+  // Получаем координаты клика
+  ClickPoint := ScreenToClient(Mouse.CursorPos);
+  MouseToCell(ClickPoint.X, ClickPoint.Y, ACol, ARow);
+
+  // Если кликнули по заголовку (ARow = 0) - ничего не делаем
+  if ARow = 0 then Exit;
+
   if (Row > 0) then
   begin
     if Cells[0, Row] = '..' then begin
       lvlUp;
-
     end
     else if DirectoryExists(FDirectory + DirectorySeparator + Cells[0, Row]) then begin
       dirlist.Add(Cells[0, Row]);
@@ -1177,7 +1198,9 @@ procedure TFileListGrid.Click;
 begin
   inherited Click;
   if rowcount > 1 then selItem := Cells[0, Row];
-  if (Assigned(FOnFileSelect)and(fileexists(FDirectory + DirectorySeparator + Cells[0, Row]))) then FOnFileSelect(Self, FDirectory + DirectorySeparator + Cells[0, Row]); // Выбор файла
+
+  if (Assigned(FOnFileSelect)and(fileexists(FDirectory + DirectorySeparator + Cells[0, Row])))
+  then FOnFileSelect(Self, FDirectory + DirectorySeparator + Cells[0, Row]); // Выбор файла
 end;
 
 procedure TFileListGrid.KeyDown(var Key: Word; Shift: TShiftState);

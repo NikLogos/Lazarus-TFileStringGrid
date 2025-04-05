@@ -72,6 +72,7 @@ type
     function Add: TKeyValueItem;
     function GetItem(Index: Integer): TKeyValueItem;
     function GetItemValueByKey(Key: String): String;
+    function GetItemIndexByKey(Key: String): integer;
     function GetItemsCount:integer;
     property Items[Index: Integer]: TKeyValueItem read GetItem write SetItem; default;
   end;
@@ -218,6 +219,21 @@ begin
     if ((Items[I].Key = Key)and(key<>'')) then
     begin
       Result := Items[I].Value;
+      Exit;
+    end;
+  end;
+end;
+
+function TKeyValueCollection.GetItemIndexByKey(Key: String): integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to Count - 1 do
+  begin
+    if ((Items[I].Key = Key)and(key<>'')) then
+    begin
+      Result := I;
       Exit;
     end;
   end;
@@ -580,8 +596,8 @@ begin
           if (SR.Name <> '.') then
           begin
             if (SR.Attr and faDirectory) <> 0
-            then Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd:mm:yy hh:nn:ss', FileDateToDateTime(SR.Time)))
-            else Files.Add(SR.Name + '=' + IntToStr(SR.Size) + '=' + FormatDateTime('dd:mm:yy hh:nn:ss', FileDateToDateTime(SR.Time)));
+            then Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)))
+            else Files.Add(SR.Name + '=' + IntToStr(SR.Size) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)));
           end;
         until FindNext(SR) <> 0;
         FindClose(SR);
@@ -958,6 +974,7 @@ begin
   if DateStr = '' then Exit;
 
   try
+    {
     // Разбираем строку формата 'dd:mm:yy hh:nn:ss'
     Day := StrToInt(Copy(DateStr, 1, 2));
     Month := StrToInt(Copy(DateStr, 4, 2));
@@ -973,6 +990,9 @@ begin
     Sec := StrToInt(Copy(DateStr, 16, 2));
 
     Result := EncodeDateTime(Year, Month, Day, Hour, Min, Sec, 0);
+    }
+
+    result:=scanDateTime('dd mmm yyyy hh:nn',DateStr);
   except
     Result := 0;
   end;

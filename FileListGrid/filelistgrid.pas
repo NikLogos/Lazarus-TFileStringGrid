@@ -74,6 +74,7 @@ type
     function GetItemValueByKey(Key: String): String;
     function GetItemIndexByKey(Key: String): integer;
     function GetItemsCount:integer;
+    procedure Clear;
     property Items[Index: Integer]: TKeyValueItem read GetItem write SetItem; default;
   end;
 
@@ -119,18 +120,22 @@ type
 
     tmpMenuList:tstringlist;
 
-    //сорт
     FLastSortColumn: Integer;
     FLastSortMode: TSortMode;
 
+    showHidden:boolean;
+    showSys:boolean;
+
     procedure LoadFiles;
+    function FileIsHidden(const FileName: string): Boolean;
+    function FileIsSystem(const FileName: string): Boolean;
+
     procedure SortFiles(SortMode: TSortMode);
     procedure AdjustColumnWidth;
     procedure GetFileIcon(const FileName: string; Icon: TIcon);
     function FindRowByText(const SearchText: string): integer;
     procedure SelectRow(arow: Integer);
     procedure clearSelected;
-//    procedure SafeDrawIcon(ACanvas: TCanvas; X, Y: Integer; AIcon: TIcon);
 
     function itbs(path:string):string;
 
@@ -177,6 +182,8 @@ type
     property FilesColorUse: boolean read usefcolor write usefcolor;
     property FilesColor: TKeyValueCollection read FFilesColor write FFilesColor;
     property SortMode: TSortMode read FLastSortMode write SetSortMode;
+    property FilesShowHidden: boolean read showHidden write showHidden;
+    property FilesShowSys: boolean read showSys write showSys;
 
 
   end;
@@ -242,6 +249,11 @@ end;
 function TKeyValueCollection.GetItemsCount: integer;
 begin
   result:=count;
+end;
+
+procedure TKeyValueCollection.Clear;
+begin
+  inherited clear;
 end;
 
 {TFileListGrid}
@@ -354,10 +366,34 @@ begin
      Key:='.jpeg';
      Value:='$003DBE71';
   end;
+  with FFilesColor.Add do
+  begin
+     Key:='bgcolor';
+     Value:='$00E6EEF0';
+  end;
+  with FFilesColor.Add do
+  begin
+     Key:='.sys';
+     Value:='4734874';
+  end;
+  with FFilesColor.Add do
+  begin
+     Key:='system';
+     Value:='4734874';
+  end;
+   with FFilesColor.Add do
+  begin
+     Key:='hidden';
+     Value:='10725807';
+  end;
+
   tmpMenuList:=tstringlist.Create;
 
   FLastSortMode:=smNameAsc;
   FLastSortColumn:=-1;
+
+  showHidden:=false;
+  showSys:=false;
 end;
 
 destructor TFileListGrid.Destroy;
@@ -574,105 +610,6 @@ begin
 
 end;
 }
-
-procedure TFileListGrid.LoadFiles;
-var
-  Folders, Files: TStringList;
-  SR: TSearchRec;
-  NewRow, i, EqPos: Integer;
-  FileName, FileSize, FileDate, tmp: String;
-  fsize: real;
-begin
-  BeginUpdate;
-  try
-    RowCount := 1;
-
-    Folders := TStringList.Create;
-    Files := TStringList.Create;
-    try
-      if FindFirst(FDirectory + DirectorySeparator + '*', faAnyFile, SR) = 0 then
-      begin
-        repeat
-          if (SR.Name <> '.') then
-          begin
-            if (SR.Attr and faDirectory) <> 0
-            then Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)))
-            else Files.Add(SR.Name + '=' + IntToStr(SR.Size) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)));
-          end;
-        until FindNext(SR) <> 0;
-        FindClose(SR);
-      end;
-
-      // Добавляем папки в список
-      for i := 0 to Folders.Count - 1 do
-      begin
-        tmp := Folders[i];
-        EqPos := Pos('=', tmp);
-        if EqPos > 0 then
-        begin
-          FileName := Copy(tmp, 1, EqPos - 1);
-          Delete(tmp, 1, EqPos);
-
-          EqPos := Pos('=', tmp);
-          FileSize := Copy(tmp, 1, EqPos - 1);
-          Delete(tmp, 1, EqPos);
-          FileDate := tmp;
-
-          RowCount := RowCount + 1;
-          NewRow := RowCount - 1;
-          Cells[0, NewRow] := FileName;
-          Cells[1, NewRow] := langFolderName;
-          Cells[2, NewRow] := FileDate; // Теперь для папок тоже выводится дата
-        end;
-      end;
-
-      // Добавляем файлы в список
-      for i := 0 to Files.Count - 1 do
-      begin
-        tmp := Files[i];
-        EqPos := Pos('=', tmp);
-        if EqPos > 0 then
-        begin
-          FileName := Copy(tmp, 1, EqPos - 1);
-          Delete(tmp, 1, EqPos);
-
-          EqPos := Pos('=', tmp);
-          FileSize := Copy(tmp, 1, EqPos - 1);
-
-          // Преобразование размера
-          fsize := StrToFloat(FileSize);
-          if fsize < 1024 then
-            FileSize := FileSize + langByte
-          else if fsize < 1048576 then
-            FileSize := FloatToStrF(fsize/1024, ffFixed, 8, 2) + langKiloByte
-          else if fsize < 1073741824 then
-            FileSize := FloatToStrF(fsize/1048576, ffFixed, 8, 2) + langMegaByte
-          else
-            FileSize := FloatToStrF(fsize/1073741824, ffFixed, 8, 2) + langGigaByte;
-
-          Delete(tmp, 1, EqPos);
-          FileDate := tmp;
-
-          RowCount := RowCount + 1;
-          NewRow := RowCount - 1;
-          Cells[0, NewRow] := FileName;
-          Cells[1, NewRow] := FileSize;
-          Cells[2, NewRow] := FileDate;
-        end;
-      end;
-
-    finally
-      Folders.Free;
-      Files.Free;
-    end;
-
-    sortFiles(FLastSortMode);
-    SelectRow(FindRowByText(selItem));
-  finally
-    EndUpdate;
-  end;
-
-end;
 
 
 procedure TFileListGrid.AdjustColumnWidth;
@@ -974,30 +911,146 @@ begin
   if DateStr = '' then Exit;
 
   try
-    {
-    // Разбираем строку формата 'dd:mm:yy hh:nn:ss'
-    Day := StrToInt(Copy(DateStr, 1, 2));
-    Month := StrToInt(Copy(DateStr, 4, 2));
-    Year := StrToInt(Copy(DateStr, 7, 2));
-    // Обработка года (предполагаем, что 00-79 - это 2000-2079, 80-99 - 1980-1999)
-    if Year < 80 then
-      Year := Year + 2000
-    else
-      Year := Year + 1900;
-
-    Hour := StrToInt(Copy(DateStr, 10, 2));
-    Min := StrToInt(Copy(DateStr, 13, 2));
-    Sec := StrToInt(Copy(DateStr, 16, 2));
-
-    Result := EncodeDateTime(Year, Month, Day, Hour, Min, Sec, 0);
-    }
-
     result:=scanDateTime('dd mmm yyyy hh:nn',DateStr);
   except
     Result := 0;
   end;
 end;
 
+procedure TFileListGrid.LoadFiles;
+var
+  Folders, Files: TStringList;
+  SR: TSearchRec;
+  NewRow, i, EqPos: Integer;
+  FileName, FileSize, FileDate, tmp: String;
+  fsize: real;
+
+  //FileAttr: Integer;
+
+  function ShouldSkipFile: Boolean;
+  begin
+    Result := False;
+    if (not ShowHidden) and ((SR.Attr and faHidden) <> 0) then Result := True;
+    if (not ShowSys) and ((SR.Attr and faSysFile) <> 0) then Result := True;
+  end;
+
+begin
+  BeginUpdate;
+  try
+    RowCount := 1;
+
+    Folders := TStringList.Create;
+    Files := TStringList.Create;
+    try
+      if FindFirst(FDirectory + DirectorySeparator + '*', faAnyFile, SR) = 0 then
+      begin
+        repeat
+          if (SR.Name <> '.') and (SR.Name<>'..') then
+          begin
+            // Пропускаем файлы/папки в зависимости от настроек
+            if ShouldSkipFile then Continue;
+
+            if (SR.Attr and faDirectory) <> 0 then
+              Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)))
+            else
+              Files.Add(SR.Name + '=' + IntToStr(SR.Size) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)))
+          end
+          else if SR.Name = '..' then
+               begin
+                 // Всегда добавляем родительскую директорию, независимо от настроек
+                 Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)));
+               end;
+        until FindNext(SR) <> 0;
+        FindClose(SR);
+      end;
+
+      // Добавляем папки в список
+      for i := 0 to Folders.Count - 1 do
+      begin
+        tmp := Folders[i];
+        EqPos := Pos('=', tmp);
+        if EqPos > 0 then
+        begin
+          FileName := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+
+          EqPos := Pos('=', tmp);
+          FileSize := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+          FileDate := tmp;
+
+          RowCount := RowCount + 1;
+          NewRow := RowCount - 1;
+          Cells[0, NewRow] := FileName;
+          Cells[1, NewRow] := langFolderName;
+          Cells[2, NewRow] := FileDate; // Теперь для папок тоже выводится дата
+        end;
+      end;
+
+      // Добавляем файлы в список
+      for i := 0 to Files.Count - 1 do
+      begin
+        tmp := Files[i];
+        EqPos := Pos('=', tmp);
+        if EqPos > 0 then
+        begin
+          FileName := Copy(tmp, 1, EqPos - 1);
+          Delete(tmp, 1, EqPos);
+
+          EqPos := Pos('=', tmp);
+          FileSize := Copy(tmp, 1, EqPos - 1);
+
+          // Преобразование размера
+          fsize := StrToFloat(FileSize);
+          if fsize < 1024 then
+            FileSize := FileSize + langByte
+          else if fsize < 1048576 then
+            FileSize := FloatToStrF(fsize/1024, ffFixed, 8, 2) + langKiloByte
+          else if fsize < 1073741824 then
+            FileSize := FloatToStrF(fsize/1048576, ffFixed, 8, 2) + langMegaByte
+          else
+            FileSize := FloatToStrF(fsize/1073741824, ffFixed, 8, 2) + langGigaByte;
+
+          Delete(tmp, 1, EqPos);
+          FileDate := tmp;
+
+          RowCount := RowCount + 1;
+          NewRow := RowCount - 1;
+          Cells[0, NewRow] := FileName;
+          Cells[1, NewRow] := FileSize;
+          Cells[2, NewRow] := FileDate;
+        end;
+      end;
+
+    finally
+      Folders.Free;
+      Files.Free;
+    end;
+
+    sortFiles(FLastSortMode);
+    SelectRow(FindRowByText(selItem));
+  finally
+    EndUpdate;
+  end;
+
+end;
+
+function TFileListGrid.FileIsHidden(const FileName: string): Boolean;
+var
+  Attr: Integer;
+begin
+  Attr := FileGetAttr(FileName);
+  Result := (Attr <> -1) and ((Attr and faHidden) <> 0);
+end;
+
+function TFileListGrid.FileIsSystem(const FileName: string): Boolean;
+
+var
+  Attr: Integer;
+begin
+  Attr := FileGetAttr(FileName);
+  Result := (Attr <> -1) and ((Attr and faSysFile) <> 0);
+end;
 
 procedure TFileListGrid.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
@@ -1030,7 +1083,7 @@ begin
   IsFolder := (ARow > 0) and (Cells[1, ARow] = langFolderName);
   IsInsSelected := (selItems.Count <> 0) and (selitems.IndexOf(Cells[0, ARow]) <> -1);
 
-
+  {
   // Определяем цвет текста для всей строки
   if IsInsSelected then
     TextColor := clRed
@@ -1043,7 +1096,46 @@ begin
     if tmp<>''
     then TextColor:=strtoint(tmp)
     else TextColor:=clBlack;
+  end
+  else
+    TextColor := clBlack;
+  }
 
+  if IsInsSelected then
+  TextColor := clRed
+  {else if IsFolder then
+    TextColor := clBlack}
+  else if (usefcolor) and (FFilesColor.GetItemsCount <> 0) then
+  begin
+    // Проверяем сначала атрибуты файла (системные/скрытые)
+    FilePath := itbs(FDirectory) + Cells[0, ARow];
+
+    //if FileExists(FilePath) or DirectoryExists(FilePath) then // Для обеспечения безопасности перед проверкой атрибутов
+    //но, по идее, они не могут попасть в список. если оне не существуют
+    begin
+      // Проверка на скрытый/системный файл
+      if (ShowSys) and (FileIsSystem(FilePath)) then
+      begin
+        tmp := ffilescolor.GetItemValueByKey('system');
+        if tmp <> '' then TextColor := StrToInt(tmp);
+      end
+      else if (ShowHidden) and (FileIsHidden(FilePath)) then
+      begin
+        tmp := ffilescolor.GetItemValueByKey('hidden');
+        if tmp <> '' then TextColor := StrToInt(tmp);
+      end
+      // Если не системный и не скрытый, или если такие показываются - проверяем по расширению
+      else
+      begin
+        tmp := ffilescolor.GetItemValueByKey(UTF8LowerCase(ExtractFileExt(Cells[0, ARow])));
+        if tmp <> '' then
+          TextColor := StrToInt(tmp);
+      end;
+    end;
+
+  // Если цвет не был установлен - черный по умолчанию
+  if TextColor = clBlack then
+    TextColor := clBlack;
   end
   else
     TextColor := clBlack;

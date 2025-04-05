@@ -958,7 +958,7 @@ begin
           else if SR.Name = '..' then
                begin
                  // Всегда добавляем родительскую директорию, независимо от настроек
-                 Folders.Add(SR.Name + '=' + IntToStr(0) + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)));
+                 Folders.Add(SR.Name + '=' + '' + '=' + FormatDateTime('dd mmm yyyy hh:nn', FileDateToDateTime(SR.Time)));
                end;
         until FindNext(SR) <> 0;
         FindClose(SR);
@@ -1112,6 +1112,7 @@ begin
 
     //if FileExists(FilePath) or DirectoryExists(FilePath) then // Для обеспечения безопасности перед проверкой атрибутов
     //но, по идее, они не могут попасть в список. если оне не существуют
+    if Cells[0, ARow] = '..' then TextColor:=clBlack else
     begin
       // Проверка на скрытый/системный файл
       if (ShowSys) and (FileIsSystem(FilePath)) then
@@ -1134,12 +1135,9 @@ begin
     end;
 
   // Если цвет не был установлен - черный по умолчанию
-  if TextColor = clBlack then
-    TextColor := clBlack;
-  end
-  else
-    TextColor := clBlack;
+  // TextColor := clBlack;
 
+  end;
   // Отрисовка фона для выделенных строк
   if (gdSelected in AState) and (goRowSelect in Options) then
   begin

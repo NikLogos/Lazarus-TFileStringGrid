@@ -63,18 +63,49 @@ implementation
 procedure TDirectoryWatcher.Execute;
 var
   BytesReturned: DWORD;
+  Overlapped: TOverlapped;
+  WaitResult: DWORD;
 begin
-  while not Terminated do
+  FillChar(Overlapped, SizeOf(Overlapped), 0);
+  Overlapped.hEvent := CreateEvent(nil, TRUE, FALSE, nil);
+  if Overlapped.hEvent = 0 then
   begin
-    if ReadDirectoryChangesW(FHandle, @FBuffer, SizeOf(FBuffer), False,
-      FILE_NOTIFY_CHANGE_FILE_NAME or FILE_NOTIFY_CHANGE_DIR_NAME or FILE_NOTIFY_CHANGE_SIZE or FILE_NOTIFY_CHANGE_LAST_WRITE,
-      @BytesReturned, nil, nil) then
-    begin
-      Synchronize(@DoChange);
-    end
-      else Synchronize(@DoError);
+    Synchronize(@DoError);
+    Exit;
   end;
-  CancelIo(FHandle);
+
+  try
+    while not Terminated do
+    begin
+      if not ReadDirectoryChangesW(FHandle, @FBuffer, SizeOf(FBuffer), False,
+        FILE_NOTIFY_CHANGE_FILE_NAME or FILE_NOTIFY_CHANGE_DIR_NAME or
+        FILE_NOTIFY_CHANGE_SIZE or FILE_NOTIFY_CHANGE_LAST_WRITE,
+        @BytesReturned, @Overlapped, nil) then
+      begin
+        Synchronize(@DoError);
+        Break;
+      end;
+
+      WaitResult := WaitForSingleObject(Overlapped.hEvent, 1000);
+      case WaitResult of
+        WAIT_OBJECT_0:
+          if not Terminated then
+            Synchronize(@DoChange);
+
+        WAIT_TIMEOUT:
+          Continue;
+
+        else
+        begin
+          Synchronize(@DoError);
+          Break;
+        end;
+      end;
+    end;
+  finally
+    CancelIo(FHandle);
+    CloseHandle(Overlapped.hEvent);
+  end;
 end;
 
 procedure TDirectoryWatcher.DoChange;
@@ -89,35 +120,28 @@ end;
 
 constructor TDirectoryWatcher.Create(const ADirectory: string);
 begin
-  inherited Create(false);
+  inherited Create(False);
   FreeOnTerminate := False;
-  FDirectory := ADirectory;
+  FDirectory := IncludeTrailingPathDelimiter(ADirectory);
 
-  // Открываем папку для отслеживания
-  try
-    FHandle := CreateFile(PChar(UTF8ToWinCP(FDirectory)), FILE_LIST_DIRECTORY,
-      FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE,
-      nil, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, 0);
-
-  except
-    raise Exception.Create('Ошибка потока отслеживания');
-  end;
+  FHandle := CreateFile(PChar(UTF8ToWinCP(FDirectory)), FILE_LIST_DIRECTORY,
+    FILE_SHARE_READ or FILE_SHARE_WRITE or FILE_SHARE_DELETE,
+    nil, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS or FILE_FLAG_OVERLAPPED, 0);
 
   if FHandle = INVALID_HANDLE_VALUE then
   begin
-    Synchronize(@doError);
+    Synchronize(@DoError);
     Terminate;
-    Exit;  // Выходим, чтобы не запускать поток
   end;
 end;
 
 destructor TDirectoryWatcher.Destroy;
 begin
-  terminate;
-  if FHandle <> INVALID_HANDLE_VALUE then begin
-    CancelIoEx(FHandle, nil);   // Прерываем ReadDirectoryChangesW
+  Terminate;
+  if FHandle <> INVALID_HANDLE_VALUE then
+  begin
+    CancelIo(FHandle);
     CloseHandle(FHandle);
-    FHandle := INVALID_HANDLE_VALUE;
   end;
   inherited Destroy;
 end;

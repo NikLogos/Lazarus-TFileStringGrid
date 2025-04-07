@@ -446,7 +446,7 @@ end;
 
 procedure TFileListGrid.thError(sender: tobject);
 begin
-  showmessage('Хитрожопая ошибка обработчика');
+//  showmessage('Хитрожопая ошибка обработчика');
 end;
 
 procedure TFileListGrid.runApp(path: string; cmdline: tstringlist);

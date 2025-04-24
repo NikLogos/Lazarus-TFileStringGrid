@@ -446,7 +446,7 @@ end;
 
 procedure TFileListGrid.thError(sender: tobject);
 begin
-  showmessage('Хитрожопая ошибка обработчика');
+//  showmessage('Хитрожопая ошибка обработчика');
 end;
 
 procedure TFileListGrid.runApp(path: string; cmdline: tstringlist);
@@ -1374,11 +1374,13 @@ begin
          AProcess := TProcess.Create(nil);
          try
            try
+            //setcurrentdir(itbs(FDirectory));
             aProcess.InheritHandles := False;
             aProcess.Options := aProcess.Options+[poUsePipes];
             aProcess.ShowWindow := swoShow;
             for I := 1 to GetEnvironmentVariableCount do aProcess.Environment.Add(GetEnvironmentString(I));
             aProcess.Executable := FDirectory + DirectorySeparator + Cells[0, Row];
+            aProcess.CurrentDirectory:=FDirectory;
             aprocess.Execute;
            except
               on E: exception do opendocument(itbs(FDirectory)+Cells[0, Row])
